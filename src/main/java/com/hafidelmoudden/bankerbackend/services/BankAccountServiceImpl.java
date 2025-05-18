@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.hafidelmoudden.bankerbackend.dtos.*;
 import com.hafidelmoudden.bankerbackend.entities.*;
+import com.hafidelmoudden.bankerbackend.enums.AccountStatus;
 import com.hafidelmoudden.bankerbackend.enums.OperationType;
 import com.hafidelmoudden.bankerbackend.exceptions.BalanceNotSufficientException;
 import com.hafidelmoudden.bankerbackend.exceptions.BankAccountNotFoundException;
@@ -14,6 +15,7 @@ import com.hafidelmoudden.bankerbackend.repositories.BankAccountRepository;
 import com.hafidelmoudden.bankerbackend.repositories.CustomerRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,7 +37,18 @@ public class BankAccountServiceImpl implements BankAccountService {
     @Override
     public CustomerDTO saveCustomer(CustomerDTO customerDTO) {
         log.info("Saving new Customer");
-        Customer customer=dtoMapper.fromCustomerDTO(customerDTO);
+        Customer customer = dtoMapper.fromCustomerDTO(customerDTO);
+        
+        // Set creation timestamp if not provided
+        if (customer.getCreatedAt() == null) {
+            customer.setCreatedAt(new Date());
+        }
+        
+        // Set createdBy if not provided
+        if (customer.getCreatedBy() == null) {
+            customer.setCreatedBy("System");
+        }
+        
         Customer savedCustomer = customerRepository.save(customer);
         return dtoMapper.fromCustomer(savedCustomer);
     }
@@ -48,9 +61,11 @@ public class BankAccountServiceImpl implements BankAccountService {
         CurrentAccount currentAccount=new CurrentAccount();
         currentAccount.setId(UUID.randomUUID().toString());
         currentAccount.setCreatedAt(new Date());
+        currentAccount.setCreatedBy("System");
         currentAccount.setBalance(initialBalance);
         currentAccount.setOverDraft(overDraft);
         currentAccount.setCustomer(customer);
+        currentAccount.setStatus(AccountStatus.ACTIVATED);
         CurrentAccount savedBankAccount = bankAccountRepository.save(currentAccount);
         return dtoMapper.fromCurrentBankAccount(savedBankAccount);
     }
@@ -63,9 +78,11 @@ public class BankAccountServiceImpl implements BankAccountService {
         SavingAccount savingAccount=new SavingAccount();
         savingAccount.setId(UUID.randomUUID().toString());
         savingAccount.setCreatedAt(new Date());
+        savingAccount.setCreatedBy("System");
         savingAccount.setBalance(initialBalance);
         savingAccount.setInterestRate(interestRate);
         savingAccount.setCustomer(customer);
+        savingAccount.setStatus(AccountStatus.ACTIVATED);
         SavingAccount savedBankAccount = bankAccountRepository.save(savingAccount);
         return dtoMapper.fromSavingBankAccount(savedBankAccount);
     }
@@ -160,9 +177,25 @@ public class BankAccountServiceImpl implements BankAccountService {
 
     @Override
     public CustomerDTO updateCustomer(CustomerDTO customerDTO) {
-        log.info("Saving new Customer");
-        Customer customer=dtoMapper.fromCustomerDTO(customerDTO);
-        Customer savedCustomer = customerRepository.save(customer);
+        log.info("Updating Customer with ID: {}", customerDTO.getId());
+        
+        // Find the existing customer first
+        Customer existingCustomer = customerRepository.findById(customerDTO.getId())
+                .orElseThrow(() -> new RuntimeException("Customer not found with ID: " + customerDTO.getId()));
+        
+        // Update only the fields that are provided in the DTO
+        if (customerDTO.getName() != null) existingCustomer.setName(customerDTO.getName());
+        if (customerDTO.getEmail() != null) existingCustomer.setEmail(customerDTO.getEmail());
+        if (customerDTO.getPhone() != null) existingCustomer.setPhone(customerDTO.getPhone());
+        if (customerDTO.getAddress() != null) existingCustomer.setAddress(customerDTO.getAddress());
+        
+        // Update modification timestamp and user
+        existingCustomer.setLastModifiedAt(new Date());
+        if (customerDTO.getLastModifiedBy() != null) {
+            existingCustomer.setLastModifiedBy(customerDTO.getLastModifiedBy());
+        }
+        
+        Customer savedCustomer = customerRepository.save(existingCustomer);
         return dtoMapper.fromCustomer(savedCustomer);
     }
     @Override
@@ -188,6 +221,25 @@ public class BankAccountServiceImpl implements BankAccountService {
         accountHistoryDTO.setCurrentPage(page);
         accountHistoryDTO.setPageSize(size);
         accountHistoryDTO.setTotalPages(accountOperations.getTotalPages());
+        
+        // Add customer information
+        if (bankAccount.getCustomer() != null) {
+            accountHistoryDTO.setCustomerId(bankAccount.getCustomer().getId());
+            accountHistoryDTO.setCustomerName(bankAccount.getCustomer().getName());
+        }
+        
+        // Add account type information
+        if (bankAccount instanceof SavingAccount) {
+            accountHistoryDTO.setAccountType("Saving Account");
+        } else if (bankAccount instanceof CurrentAccount) {
+            accountHistoryDTO.setAccountType("Current Account");
+        }
+        
+        // Add creation information
+        accountHistoryDTO.setCreatedAt(bankAccount.getCreatedAt());
+        accountHistoryDTO.setCreatedBy(bankAccount.getCreatedBy());
+        accountHistoryDTO.setStatus(bankAccount.getStatus());
+        
         return accountHistoryDTO;
     }
 
@@ -196,5 +248,53 @@ public class BankAccountServiceImpl implements BankAccountService {
         List<Customer> customers=customerRepository.searchCustomer(keyword);
         List<CustomerDTO> customerDTOS = customers.stream().map(cust -> dtoMapper.fromCustomer(cust)).collect(Collectors.toList());
         return customerDTOS;
+    }
+    
+    @Override
+    public Page<BankAccountDTO> listAccountsWithPagination(Pageable pageable) {
+        Page<BankAccount> bankAccounts = bankAccountRepository.findAll(pageable);
+        return bankAccounts.map(bankAccount -> {
+            if (bankAccount instanceof SavingAccount) {
+                SavingAccount savingAccount = (SavingAccount) bankAccount;
+                return dtoMapper.fromSavingBankAccount(savingAccount);
+            } else {
+                CurrentAccount currentAccount = (CurrentAccount) bankAccount;
+                return dtoMapper.fromCurrentBankAccount(currentAccount);
+            }
+        });
+    }
+    
+    @Override
+    public Page<BankAccountDTO> searchAccounts(String keyword, Pageable pageable) {
+        if (keyword == null || keyword.isEmpty()) {
+            return listAccountsWithPagination(pageable);
+        }
+        
+        // Search by account ID or customer name
+        Page<BankAccount> bankAccounts = bankAccountRepository.searchAccounts("%" + keyword + "%", pageable);
+        return bankAccounts.map(bankAccount -> {
+            if (bankAccount instanceof SavingAccount) {
+                SavingAccount savingAccount = (SavingAccount) bankAccount;
+                return dtoMapper.fromSavingBankAccount(savingAccount);
+            } else {
+                CurrentAccount currentAccount = (CurrentAccount) bankAccount;
+                return dtoMapper.fromCurrentBankAccount(currentAccount);
+            }
+        });
+    }
+    
+    @Override
+    public List<BankAccountDTO> getCustomerAccounts(Long customerId) {
+        List<BankAccount> bankAccounts = bankAccountRepository.findByCustomerId(customerId);
+        List<BankAccountDTO> bankAccountDTOS = bankAccounts.stream().map(bankAccount -> {
+            if (bankAccount instanceof SavingAccount) {
+                SavingAccount savingAccount = (SavingAccount) bankAccount;
+                return dtoMapper.fromSavingBankAccount(savingAccount);
+            } else {
+                CurrentAccount currentAccount = (CurrentAccount) bankAccount;
+                return dtoMapper.fromCurrentBankAccount(currentAccount);
+            }
+        }).collect(Collectors.toList());
+        return bankAccountDTOS;
     }
 }

@@ -8,6 +8,8 @@ import com.hafidelmoudden.bankerbackend.entities.SavingAccount;
 import com.hafidelmoudden.bankerbackend.exceptions.BalanceNotSufficientException;
 import com.hafidelmoudden.bankerbackend.exceptions.BankAccountNotFoundException;
 import com.hafidelmoudden.bankerbackend.exceptions.CustomerNotFoundException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 import java.util.List;
 public interface BankAccountService {
@@ -21,6 +23,12 @@ public interface BankAccountService {
     void transfer(String accountIdSource, String accountIdDestination, double amount) throws BankAccountNotFoundException, BalanceNotSufficientException;
 
     List<BankAccountDTO> bankAccountList();
+    
+    Page<BankAccountDTO> listAccountsWithPagination(Pageable pageable);
+    
+    Page<BankAccountDTO> searchAccounts(String keyword, Pageable pageable);
+    
+    List<BankAccountDTO> getCustomerAccounts(Long customerId);
 
     CustomerDTO getCustomer(Long customerId) throws CustomerNotFoundException;
 
