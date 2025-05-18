@@ -3,7 +3,10 @@ package com.hafidelmoudden.bankerbackend.web;
 import com.hafidelmoudden.bankerbackend.dtos.*;
 import com.hafidelmoudden.bankerbackend.exceptions.BalanceNotSufficientException;
 import com.hafidelmoudden.bankerbackend.exceptions.BankAccountNotFoundException;
+import com.hafidelmoudden.bankerbackend.exceptions.CustomerNotFoundException;
 import com.hafidelmoudden.bankerbackend.services.BankAccountService;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -21,10 +24,42 @@ public class BankAccountRestAPI {
     public BankAccountDTO getBankAccount(@PathVariable String accountId) throws BankAccountNotFoundException {
         return bankAccountService.getBankAccount(accountId);
     }
+    
     @GetMapping("/accounts")
-    public List<BankAccountDTO> listAccounts(){
-        return bankAccountService.bankAccountList();
+    public Page<BankAccountDTO> listAccounts(
+            @RequestParam(name="page", defaultValue = "0") int page,
+            @RequestParam(name="size", defaultValue = "10") int size) {
+        return bankAccountService.listAccountsWithPagination(PageRequest.of(page, size));
     }
+    
+    @PostMapping("/accounts")
+    public BankAccountDTO createAccount(@RequestBody AccountRequest accountRequest) throws CustomerNotFoundException {
+        if (accountRequest.getAccountType().equalsIgnoreCase("CURRENT")) {
+            return bankAccountService.saveCurrentBankAccount(
+                    accountRequest.getInitialBalance(),
+                    accountRequest.getOverDraft() != null ? accountRequest.getOverDraft() : 9000, // Default overdraft
+                    accountRequest.getCustomerId());
+        } else {
+            return bankAccountService.saveSavingBankAccount(
+                    accountRequest.getInitialBalance(),
+                    accountRequest.getInterestRate() != null ? accountRequest.getInterestRate() : 5.5, // Default interest rate
+                    accountRequest.getCustomerId());
+        }
+    }
+    
+    @GetMapping("/accounts/search")
+    public Page<BankAccountDTO> searchAccounts(
+            @RequestParam(name="keyword", defaultValue = "") String keyword,
+            @RequestParam(name="page", defaultValue = "0") int page,
+            @RequestParam(name="size", defaultValue = "10") int size) {
+        return bankAccountService.searchAccounts(keyword, PageRequest.of(page, size));
+    }
+    
+    @GetMapping("/accounts/customer/{customerId}")
+    public List<BankAccountDTO> getCustomerAccounts(@PathVariable Long customerId) {
+        return bankAccountService.getCustomerAccounts(customerId);
+    }
+    
     @GetMapping("/accounts/{accountId}/operations")
     public List<AccountOperationDTO> getHistory(@PathVariable String accountId){
         return bankAccountService.accountHistory(accountId);
