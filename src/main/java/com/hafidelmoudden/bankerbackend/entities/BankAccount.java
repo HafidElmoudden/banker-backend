@@ -17,6 +17,7 @@ public abstract class BankAccount {
     private String id;
     private double balance;
     private Date createdAt;
+    private String createdBy;
     @Enumerated(EnumType.STRING)
     private AccountStatus status;
     @ManyToOne
